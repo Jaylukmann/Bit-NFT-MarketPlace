@@ -81,8 +81,8 @@ contract BitNFTMarketPlace is Ownable{
     //NFT can be bought between now and the next 40 days otherwise,it has to be re-listed 
     function listToken(address _nftContractAddress, uint _nftTokenId, uint _price) 
         public payable returns (uint _agreementId) {
-            //Approve before sending
-        //IERC721(_nftContractAddress).approve( address(this), _nftTokenId);
+    //Approve before sending
+        IERC721(_nftContractAddress).approve(msg.sender,_nftTokenId);
     //use openzepellin ERC721 safeTransferFrom function to transfer NFT token safely     
         IERC721(_nftContractAddress).safeTransferFrom(msg.sender, address(this), _nftTokenId);
     //update the agreementId of the NFT to be listed using Counters library
@@ -107,7 +107,7 @@ contract BitNFTMarketPlace is Ownable{
     }
 
     //buyNow function is called when the buyer wishes to pay all the ether requested by the seller
-    function buyNow(uint _agreementId,uint _nftTokenId,uint _price) public payable canBuy(_agreementId) returns(bool){
+    function buyNow(address _nftContractAddress,uint _agreementId,uint _nftTokenId,uint _price) public payable canBuy(_agreementId) returns(bool){
     //Get an instance of the Agreements Struct and give it the current Id.
         Agreements storage agreement = agreements[ _agreementId];
     //calculate commission
@@ -125,6 +125,8 @@ contract BitNFTMarketPlace is Ownable{
         IERC721(agreement.nftContractAddress).transferFrom(msg.sender,Ownable.owner(), contractValue );
         (bool etherSent, ) = payable(msg.sender).call{value: contractValue}("");
         require(etherSent, "Cannot send ether to the contract owner");
+   //Approve before sending
+        IERC721(_nftContractAddress).approve(address(this),_nftTokenId);
     //Smart contract sends nft to the buyer
         IERC721(agreement.nftContractAddress).safeTransferFrom(address(this),msg.sender,_nftTokenId);
         (bool tokenSent, ) = payable(msg.sender).call{value: _nftTokenId}("");
@@ -152,7 +154,7 @@ contract BitNFTMarketPlace is Ownable{
     }
 
     //This function is called by the buyer who wants to pay his last bits and get his nft to end the agreement
-    function payLastBit(uint _agreementId,uint _nftTokenId,uint _lastBit, Bits _bitLevel) public payable agreementEnded(_agreementId) atLastBit(_bitLevel)
+    function payLastBit(address _nftContractAddress,uint _agreementId,uint _nftTokenId,uint _lastBit, Bits _bitLevel) public payable agreementEnded(_agreementId) atLastBit(_bitLevel)
         returns (bool success){
         Agreements storage agreement = agreements[_agreementId];
     //Check if its not the seller buying. 
@@ -176,6 +178,8 @@ contract BitNFTMarketPlace is Ownable{
         IERC721(agreement.nftContractAddress).transferFrom(address(this),agreement.seller, commisionedValue );
         (bool sent, ) = payable(msg.sender).call{value:  commisionedValue}("");
         require(sent, "Cannot send ether to the seller");
+    //Approve before sending
+        IERC721(_nftContractAddress).approve(address(this),_nftTokenId);
     //Smart contract sends NFT to the buyer
         IERC721(agreement.nftContractAddress).safeTransferFrom(address(this),msg.sender, agreement.nftTokenId);
         (bool nftSent, ) = payable(msg.sender).call{value:agreement.nftTokenId }("");
@@ -199,6 +203,8 @@ contract BitNFTMarketPlace is Ownable{
     //calculate seller's compensation   
         uint bal = totalBitsPerBuyer[_agreementId][msg.sender];
         uint compensationValue = (bal * 10) / 100;
+    //Approve before sending
+        IERC721(_nftContractAddress).approve(address(this),_nftTokenId); 
     //Smart contract sends token to the seller
         IERC721(agreement.nftContractAddress).transferFrom(address(this),msg.sender,_nftTokenId);
         (bool sentToken, ) = payable(msg.sender).call{value:_nftTokenId}("");
@@ -214,7 +220,7 @@ contract BitNFTMarketPlace is Ownable{
         emit AgreementEnded(_nftTokenId, msg.sender,agreement.saleEnded);
     }
 
-    //BuyerClaimNFT function is used by the buyer to claim his nft when all installments are paid
+    //BuyerClaimFund function is used by the buyer to claim his nft when all installments are paid
     function buyerClaimFund(uint _agreementId,uint _nftTokenId,Bits _bitLevel) external  returns (bool success) {
         Agreements storage agreement = agreements[_agreementId];
         require(totalBitsPerBuyer[_agreementId][msg.sender] < agreement.price,"total payment made");
@@ -252,14 +258,3 @@ contract BitNFTMarketPlace is Ownable{
          return (agreement.price * 95)/100;
     }
     
-
-
-
-}
-
-//smart contract address of bitNFTMarketPlace
-//0xA39401319Ef1454031B9C2d9a0f2a480C453D78e
-//Smart contract address of patternNFT
-//0x2d761ccd4c8ad1ed37d23ed28cd7b9f0b1f51bc5
-//Smart contract of GEO
-//0x3695369Fd71FD48ceDaCB7813138b9e07aCD40c2
