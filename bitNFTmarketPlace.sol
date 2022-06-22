@@ -194,7 +194,7 @@ contract BitNFTMarketPlace is Ownable{
     }
 
     //This function is used by the seller at the expiry of the installment agreement
-    function sellerClaimNFT(uint _agreementId,uint _nftTokenId,Bits _bitLevel) external atLastBit(_bitLevel) {
+    function sellerClaimNFT(address _nftContractAddress,uint _agreementId,uint _nftTokenId,Bits _bitLevel) external atLastBit(_bitLevel) {
         Agreements storage agreement = agreements[_agreementId];
         require(totalBitsPerBuyer[_agreementId][msg.sender] < agreement.price,"total payment made");
         require(agreement.saleEnded == false,"Agreement ended already");
@@ -258,3 +258,5 @@ contract BitNFTMarketPlace is Ownable{
          return (agreement.price * 95)/100;
     }
     
+}
+
