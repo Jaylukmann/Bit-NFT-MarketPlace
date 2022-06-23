@@ -4,6 +4,7 @@ pragma solidity ^0.8.3;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
 //Bit-NFT-Marketplace is a marketplace where you as a seller can list your erc721 tokens 
 //for sale either on cash and carry basis or on installmental basis.
@@ -259,8 +260,13 @@ contract BitNFTMarketPlace is Ownable{
         Agreements storage agreement = agreements[_agreementId];
          return (agreement.price * 95)/100;
     }
+    function onERC721Received(
+        address operator,
+        address from,
+        uint256 tokenId,
+        bytes calldata data
+    ) public pure returns (bytes4) {
+        return this.onERC721Received.selector ;
+    }
     
 }
-
-
-
