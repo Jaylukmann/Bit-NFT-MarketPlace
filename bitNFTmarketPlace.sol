@@ -159,7 +159,7 @@ contract BitNFTMarketPlace is Ownable{
     }
 
     //This function is called by the buyer who wants to pay his last bits and get his nft to end the agreement
-    function payLastBit(address _nftContractAddress, uint _agreementId, uint _nftTokenId, uint _lastBit) public payable 
+    function payLastBit(address _nftContractAddress, uint _agreementId, uint _nftTokenId) public payable 
     canPaylastBit( _agreementId)
         returns (bool success){
         Agreements storage agreement = agreements[_agreementId];
