@@ -20,20 +20,16 @@ contract BitNFTMarketPlace is Ownable{
     //Deriving agreementId from Counters library
     Counters.Counter public agreementId;
 
-    //All events to be emitted
+  //All events to be emitted
     event NewNFTListed(address nftContractAddress,uint nftTokenId,address indexed seller,uint price);
     event NftBought(uint nftTokenId, address indexed seller,address indexed buyer, uint price);
-    event LastBitPaid(uint nftTokenId,address indexed seller, address buyer, bool debtPaid);
     event BitBuy(address nftContractAddress,uint nftTokenId,address indexed seller, address buyer,uint price);
     event SellerClaim(uint nftTokenId,address indexed seller);
     event BuyerClaim(uint nftTokenId,address indexed buyer);
-    event AgreementEnded(uint nftTokenId,address indexed sellerOrBuyer,bool saleEnded);
+    event AgreementEnded(uint nftTokenId,address indexed buyer,bool saleEnded);
     event Received(address sender,uint amount, string message);
     
-
-
-   
-   //Modelling the agreement
+//Modelling the agreement
     struct Agreements {
         address nftContractAddress;
         uint nftTokenId;
@@ -45,19 +41,17 @@ contract BitNFTMarketPlace is Ownable{
         //map amount paid in bit to each bit buyer
      mapping( address => uint) bit;
     }
-    //mapping from agreementId => seller => totalPayForSeller
+    //map from agreementId => seller => totalPayForSeller
      mapping( uint => mapping(address => uint)) public totalPayForSeller;
 
-    //Mapping each agreement to its agreementId
+    //Map each agreement to its agreementId
     mapping(uint => Agreements) public agreements;
-
 
     constructor () {        
     }
 
       modifier canListNFT(address _nftContractAddress, uint _nftTokenId){
-        bool sellerOwnsNFT =  IERC721(_nftContractAddress).ownerOf( _nftTokenId) == msg.sender ? true
-                                                            : false;
+        bool sellerOwnsNFT =  IERC721(_nftContractAddress).ownerOf( _nftTokenId) == msg.sender ? true: false;
         require(sellerOwnsNFT, "You can only list only the NFT you own"); 
         _;       
     }
@@ -68,37 +62,21 @@ contract BitNFTMarketPlace is Ownable{
         require(agreement.onBit == false,"A buyer has partly paid for this token");
         _;
     }
-    modifier canBuyInBits(uint _agreementId){
+    modifier canBuyInBits(uint _agreementId,address _seller){
         Agreements storage agreement = agreements[_agreementId];
          require(msg.sender != agreement.seller, "NFT owner cannot buy his NFT");
+         require(totalPayForSeller[_agreementId][agreement.seller] == agreement.bit[msg.sender],"This NFT has been partly paid for by another buyer");
+         require( block.timestamp < agreement.agreementEndAt,"agreement time has elapsed");
          _;
     }
-    modifier buyerCanClaimFund(uint _agreementId){
+    modifier CanClaim(uint _agreementId){
         Agreements storage agreement = agreements[_agreementId];
-        require(agreement.bit[msg.sender] < agreement.price,"total payment made");
-        require(agreement.saleEnded == false,"Agreement ended already");
-       // require(bitLevel == LastBit,"All installments have not been paid");
+        require(agreement.bit[msg.sender] < totalPayForSeller[_agreementId][agreement.seller],"total payment made");
+        require(agreement.saleEnded == true,"NFT Sale agreement has not ended yet");
         require(block.timestamp >= agreement.agreementEndAt,"The agreement has not ended yet");
         _;
     }
-    modifier sellerCanClaimNFT(uint _agreementId){
-          Agreements storage agreement = agreements[_agreementId];
-        require(totalPayForSeller[_agreementId][msg.sender] < agreement.price,"Total payment made already");
-        require(agreement.saleEnded == false,"Agreement ended already");
-       // require(bitLevel != lastBits);
-        require(block.timestamp < agreement.agreementEndAt,"The agreement has not ended yet");
-        _;
-    }
-    modifier canPaylastBit(uint _agreementId){
-        Agreements storage agreement = agreements[_agreementId];
-        require(msg.sender != agreement.seller, "NFT owner cannot buy his NFT");   
-        require(agreement.bit[msg.sender] == totalPayForSeller[_agreementId][agreement.seller],
-        "Another address has partly paid for this token");
-        require(agreement.bit[msg.sender] != agreement.price,"All instalments have been paid");
-        require( block.timestamp < agreement.agreementEndAt,"agreement time has elapsed");
-       // require(bitLevel != LastBits, "The last bit level has been hit");
-        _;
-    }
+    
      modifier agreementEnded(uint _agreementId){ 
         Agreements storage agreement = agreements[_agreementId];       
         require(agreement.saleEnded == true && (block.timestamp >= agreement.agreementEndAt),"agreement duration has not ended");
@@ -134,7 +112,7 @@ contract BitNFTMarketPlace is Ownable{
         uint  contractValue = (_price * 5) / 100;
     //Prevent re-entrancy attack
         agreement.price = 0;
-    //ether  (amount= price-contract commission) is sent from the contract to the seller
+    //ether  (amount= price minus contract commission) is sent from the contract to the seller
         (bool done, ) = payable(agreement.seller).call{value: commisionedValue}("");
         require(done, "Cannot send ether to the seller");
     //Send contract commission in form of ether to the smart contract owner
@@ -143,49 +121,50 @@ contract BitNFTMarketPlace is Ownable{
     //Smart contract sends nft to the buyer
         IERC721(_nftContractAddress).safeTransferFrom(address(this), msg.sender, _nftTokenId);
         agreement.onBit = false;
-    //Emit the the info of the Nft bought to the frontend
         emit  NftBought(_nftTokenId,agreement.seller,msg.sender, _price);
         return agreement.saleEnded = true;
     }
 
     //BuyInBit function is called by buyers who intend to buy the NFT in installments.
-    // Meanwhile a seller cannot buy his/her own token
-    function buyInBit(address _nftContractAddress, uint _agreementId,uint _nftTokenId,uint _bit) public payable 
-    canBuyInBits( _agreementId){
-        Agreements storage agreement = agreements[_agreementId];    
-        agreement.bit[msg.sender] += _bit;
-        totalPayForSeller[_agreementId][agreement.seller] += _bit;
+    function buyInBit(address _nftContractAddress, uint _agreementId,uint _nftTokenId,address _seller) public payable 
+    canBuyInBits( _agreementId,_seller) returns (bool success){
+        Agreements storage agreement = agreements[_agreementId];  
+        agreement.seller = _seller;  
+        agreement.bit[msg.sender] += msg.value;
+        totalPayForSeller[_agreementId][_seller] += msg.value;
+        //Prevent re-entrancy attack 
+        agreement.bit[msg.sender] = 0;
+       if(totalPayForSeller[_agreementId][_seller] + msg.value == agreement.price
+            && agreement.bit[msg.sender] >= agreement.price
+            && block.timestamp >= agreement.agreementEndAt){
+         agreement.saleEnded == true;
+        this.handlePayOut(_nftContractAddress,_agreementId, _nftTokenId);
+        emit AgreementEnded( _nftTokenId,msg.sender,agreement.saleEnded);
+       }else
         emit BitBuy(_nftContractAddress,_nftTokenId,agreement.seller,msg.sender,agreement.price);
+        return (success);
     }
 
-    //This function is called by the buyer who wants to pay his last bits and get his nft to end the agreement
-    function payLastBit(address _nftContractAddress, uint _agreementId, uint _nftTokenId) public payable 
-    canPaylastBit( _agreementId)
-        returns (bool success){
-        Agreements storage agreement = agreements[_agreementId];
-    //Get the balance the buyer has paid so far.    
-        uint bal =  agreement.bit[msg.sender];
-    //calculate commission
+    function handlePayOut(address _nftContractAddress,uint _agreementId,uint _nftTokenId) public payable{
+        Agreements storage agreement = agreements[_agreementId]; 
+        uint bal = agreement.bit[msg.sender];
         uint commisionedValue = (bal * 95) / 100;
         uint  contractValue = (bal * 5) / 100;
-    //Prevent re-entrancy attack
-        agreement.bit[msg.sender] = 0;
-    //Smart contract sends ether to the seller 
-        (bool Sent, ) = payable(agreement.seller).call{value:  commisionedValue}("");
-        require(Sent, "Cannot send ether to the seller");
-    //Smart contract sends NFT to the buyer
+        //sends NFT to the buyer
         IERC721(_nftContractAddress).safeTransferFrom(address(this), msg.sender,_nftTokenId);
-    //Send contract commission in form of ether to the smart contract owner
-        (bool etherSent, ) = payable(address(this)).call{value: contractValue}("");
-        require(etherSent, "Cannot send ether to the contract owner");
-        emit LastBitPaid(_nftTokenId, agreement.seller, msg.sender,success);
+        agreement.saleEnded == true;
+        //sends buyer's balance minus  contractValue to the seller
+        (bool isSent, ) = payable(msg.sender).call{value: commisionedValue}("");
+        require(isSent, "Cannot send ether to the seller");
+        //sends buyer's balance minus commissionedValue to the seller
+        (bool hasSent, ) = payable(agreement.seller).call{value: contractValue}("");
+        require(hasSent, "Cannot send ether to the seller");
         emit AgreementEnded(_nftTokenId, agreement.seller, agreement.saleEnded);
-        return (success);
     }
 
     //This function is used by the seller at the expiry of the installment agreement
     function sellerClaimNFT(address _nftContractAddress,uint _agreementId,uint _nftTokenId) external
-     agreementEnded( _agreementId) {
+     CanClaim(_agreementId) {
         Agreements storage agreement = agreements[_agreementId];
     //calculate seller's compensation   
         uint bal = agreement.bit[msg.sender];
@@ -204,7 +183,7 @@ contract BitNFTMarketPlace is Ownable{
 
     //BuyerClaimFund function is used by the buyer to claim his nft when he fails to pay all installment before the end of the agreement period
     function buyerClaimFund(uint _agreementId,uint _nftTokenId) external 
-    buyerCanClaimFund(_agreementId)  returns (bool success) {
+    CanClaim(_agreementId)  returns (bool success) {
         Agreements storage agreement = agreements[_agreementId];
     //calculate buyer's penalty   
         uint bal = agreement.bit[msg.sender];
