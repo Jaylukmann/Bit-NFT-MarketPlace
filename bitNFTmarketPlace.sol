@@ -223,8 +223,8 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
             bitsPerToken[_agreementId][msg.sender] >= agreement.price &&
             block.timestamp >= agreement.agreementEndAt
         ) {
-            agreement.saleEnded == true;
-            this.handlePayOut(_nftContractAddress, _agreementId, _nftTokenId);
+            agreement.saleEnded = true;
+            handlePayOut(_nftContractAddress, _agreementId, _nftTokenId);
             emit AgreementEnded(_nftTokenId, msg.sender, agreement.saleEnded);
         } else
             emit BitBuy(
@@ -243,6 +243,7 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         uint256 _nftTokenId
     ) public payable {
         Agreements memory agreement = agreements[_agreementId];
+        require(agreement.saleEnded, "Can only be called when sale is over");
         uint256 bal = bitsPerToken[_agreementId][msg.sender];
         uint256 commisionedValue = (bal * 95) / 100;
         uint256 contractValue = (bal * 5) / 100;
@@ -252,7 +253,7 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
             msg.sender,
             _nftTokenId
         );
-        agreement.saleEnded == true;
+        agreement.saleEnded = true;
         //sends buyer's balance minus  contractValue to the seller
         (bool isSent, ) = payable(msg.sender).call{value: commisionedValue}("");
         require(isSent, "Cannot send ether to the seller");
@@ -342,12 +343,12 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
     }
 
     // onERC721Received function helps the smart contract to receive NFT
-    function onERC721Received (
+    function onERC721Received(
         address,
         address,
         uint256,
         bytes calldata
-    ) external override pure returns (bytes4) {
+    ) external pure override returns (bytes4) {
         return this.onERC721Received.selector;
     }
 }
