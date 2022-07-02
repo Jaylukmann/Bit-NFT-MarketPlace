@@ -2,6 +2,7 @@
 pragma solidity ^0.8.3;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
@@ -20,8 +21,12 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
     //Deriving agreementId from Counters library
     Counters.Counter public agreementId;
 
-     uint256 public constant  AGREEMENT_TIME = 4 hours;
+     uint public immutable AGREEMENT_TIME; //40 days but 4 hours for testing
 
+     //constructor
+     constructor(){
+        AGREEMENT_TIME =  4 hours;
+    }
     //All events to be emitted
     event NewNFTListed(
         address nftContractAddress,
@@ -29,26 +34,41 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         address indexed seller,
         uint256 price
     );
+
     event NftBought(
         uint256 nftTokenId,
         address indexed seller,
         address indexed buyer,
         uint256 price
     );
+
     event BitBuy(
         uint256 nftTokenId,
         address indexed seller,
         address buyer,
         uint256 price
-    );
-    event SellerClaim(uint256 nftTokenId, address indexed seller);
-    event BuyerClaim(uint256 nftTokenId, address indexed buyer);
+        );
+
+    event SellerClaim(
+        uint256 nftTokenId, 
+        address indexed seller);
+
+    event BuyerClaim(
+         uint256 nftTokenId,
+         address indexed buyer
+         );
+
     event AgreementEnded(
         uint256 nftTokenId,
         address indexed buyer,
         bool saleEnded
     );
-    event Received(address sender, uint256 amount, string message);
+
+    event Received(
+        address sender, 
+        uint256 amount, 
+        string message
+        );
 
     //Modelling the agreement
    struct Agreements {
@@ -79,26 +99,26 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         Agreements storage agreement = agreements[_agreementId];
         require(msg.sender != agreement.seller, "NFT owner cannot buy his NFT");
         require(
-            msg.value == agreement.price,
+            msg.value == agreements[_agreementId].price ,
             "Value sent must be equal to NFT price"
         );
         require(
-            agreement.onBit == false,
+            agreements[_agreementId].onBit == false,
             "A buyer has partly paid for this token"
         );
         _;
     }
     
-    modifier canBuyInBits(uint256 _agreementId) {
+    modifier canBuyInBits(uint256 _agreementId,address _seller) {
         Agreements storage agreement = agreements[_agreementId];
         require(msg.sender != agreement.seller, "NFT owner cannot buy his NFT");
         require(
-            totalPayForSeller[_agreementId][agreement.seller] ==
+            totalPayForSeller[_agreementId][_seller] ==
                 agreement.bit[msg.sender],
-            "This NFT has already been partly paid by another buyer"
+            "This NFT has already been partly paid for by another buyer"
         );
         require(
-            block.timestamp < agreement.agreementEndAt,
+            block.timestamp < agreements[_agreementId].agreementEndAt,
             "agreement time has elapsed"
         );
         _;
@@ -107,15 +127,15 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
     modifier CanClaim(uint256 _agreementId) {
         Agreements storage agreement = agreements[_agreementId];
         require(
-            agreement.saleEnded == true,
+            agreements[_agreementId].saleEnded == true,
             "NFT Sale agreement has not ended yet"
         );
         require(
-            block.timestamp >= agreement.agreementEndAt,
+            block.timestamp >= agreements[_agreementId].agreementEndAt,
             "The agreement has not ended yet"
         );
         require(
-                agreement.price > agreement.bit[msg.sender],
+                  agreement.bit[msg.sender] <= agreements[_agreementId].price,
                 "total payment made"
         );
         _;
@@ -125,7 +145,7 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         Agreements storage agreement = agreements[_agreementId];
         require(
             agreement.saleEnded == true &&
-                (block.timestamp >= agreement.agreementEndAt),
+                (block.timestamp >= agreements[_agreementId].agreementEndAt),
             "agreement duration has not ended"
         );
         _;
@@ -166,57 +186,59 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
     }
 
     //buyNow function is called when the buyer wishes to pay all the ether requested by the seller
-    function buyNow(
+    function buyNow(address _nftContractAddress,
         uint256 _agreementId,
-        uint256 _nftTokenId
+        uint256 _nftTokenId,
+        address _seller
     ) public payable canBuyNow(_agreementId) returns (bool) {
         Agreements storage agreement = agreements[_agreementId];
         //calculate commission
-        uint256 commisionedValue = (agreement.price * 95) / 100;
-        uint256 contractValue = (agreement.price * 5) / 100;
+       
         //Prevent re-entrancy attack
-        agreement.price = 0;
-        //ether  (amount= price minus contract commission) is sent from the contract to the seller
-        (bool done, ) = payable(agreement.seller).call{value: commisionedValue}(
+       agreement.price = 0;
+       // ether  (amount= price minus contract commission) is sent from the buyer to the seller
+        (bool done, ) = payable(_seller).call{value: (msg.value * 95)/100}(
             ""
         );
         require(done, "Cannot send ether to the seller");
 
         //Send contract commission in form of ether to the smart contract owner
         (bool etherSent, ) = payable(Ownable.owner()).call{
-            value: contractValue
+            value: (msg.value * 5)/100
         }("");
         require(etherSent, "Cannot send ether to the contract owner");
 
         //Smart contract sends nft to the buyer
-        IERC721(agreement.nftContractAddress).safeTransferFrom(
+        IERC721(_nftContractAddress).safeTransferFrom(
             address(this),
             msg.sender,
             _nftTokenId
         );
-        agreement.onBit = false;
-         agreement.saleEnded = true;
+        agreements[_agreementId].onBit = false;
+         agreements[_agreementId].saleEnded = true;
         emit NftBought(_nftTokenId, agreement.seller, msg.sender, agreement.price);
         return true;
     }
     function handlePayOut(
+        address _nftContractAddress,
         uint256 _agreementId,
-        uint256 _nftTokenId
+        uint256 _nftTokenId,
+        address _seller
     )   public payable {
         Agreements storage agreement = agreements[_agreementId];
-        uint256 bal = agreement.bit[msg.sender];
-        uint256 commisionedValue = (bal * 95) / 100;
-        uint256 contractValue = (bal * 5) / 100;
+        
         //sends seller's balance minus  contractValue to the seller
-        (bool isSent, ) = payable(agreement.seller).call{value: commisionedValue}("");
+        (bool isSent, ) = payable(_seller).call{value: (msg.value * 95)/100}("");
         require(isSent, "Cannot send ether to the seller");
+
         //sends smart contract owners commission
-        (bool hasSent, ) = payable(Ownable.owner()).call{value: contractValue}(
+        (bool hasSent, ) = payable(Ownable.owner()).call{value: (msg.value * 5)/100}(
             ""
         );
         require(hasSent, "Cannot send ether to the seller");
+
         //sends NFT to the buyer
-        IERC721(agreement.nftContractAddress).safeTransferFrom(
+        IERC721(_nftContractAddress).safeTransferFrom(
             address(this),
             msg.sender,
             _nftTokenId
@@ -226,27 +248,31 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
     }
     //BuyInBit function is called by buyers who intend to buy the NFT in installments.
     function buyInBit(
+        address _nftContractAddress,
         uint256 _agreementId,
-        uint256 _nftTokenId
+        uint256 _nftTokenId,
+        address _seller
     )
         public
         payable
-        canBuyInBits(_agreementId)
+        canBuyInBits(_agreementId,_seller)
         returns (bool success)
     {
         Agreements storage agreement = agreements[_agreementId];
+
+        //Send ether to the smart contract
         (bool isSent, ) = payable(address(this)).call{value: msg.value}("");
-        require(isSent, "Cannot send ether to the seller");
+        require(isSent, "Cannot send ether to the contract");
         agreement.bit[msg.sender] += msg.value;
-        totalPayForSeller[_agreementId][agreement.seller] += msg.value;
+        totalPayForSeller[_agreementId][_seller] += msg.value;
     
         if (
-            totalPayForSeller[_agreementId][agreement.seller] ==
-            agreement.price &&
-            agreement.bit[msg.sender] >= agreement.price &&
-            block.timestamp >= agreement.agreementEndAt
+            totalPayForSeller[_agreementId][_seller] ==
+            agreements[_agreementId].price &&
+            agreement.bit[msg.sender] == agreements[_agreementId].price 
+            //block.timestamp >= agreements[_agreementId].agreementEndAt
         ) {
-            handlePayOut( _agreementId, _nftTokenId);
+            handlePayOut( _nftContractAddress, _agreementId, _nftTokenId,_seller);
             emit AgreementEnded(_nftTokenId, msg.sender, agreement.saleEnded);
         } else
             emit BitBuy(
@@ -262,32 +288,32 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
 
     //This function is used by the seller at the expiry of the installment agreement
     function sellerClaimNFT(
+        address _nftContractAddress,
         uint256 _agreementId,
         uint256 _nftTokenId
-    ) external CanClaim(_agreementId) {
+    ) public payable CanClaim(_agreementId) {
         Agreements storage agreement = agreements[_agreementId];
-        //calculate seller's compensation
-        uint256 bal = totalPayForSeller[_agreementId][msg.sender];
-        uint256 compensationFee = (bal * 5) / 100;
+        uint bal = totalPayForSeller[_agreementId][msg.sender];
+        uint sellersCompensation  = ((bal * 5 )/100);
         //Smart contract sends compensation ether to the seller
-        (bool compensationSent, ) = payable(msg.sender).call{
-            value: compensationFee
-        }("");
-        require(compensationSent, "Cannot send ether to the seller");
+         payable(msg.sender).transfer(sellersCompensation);
+        
         //Smart contract sends token to the seller
-        IERC721(agreement.nftContractAddress).safeTransferFrom(
+        IERC721(_nftContractAddress).safeTransferFrom(
             address(this),
             msg.sender,
             _nftTokenId
         );
-        agreement.saleEnded = true;
+        agreements[_agreementId].saleEnded = true;
         
         emit SellerClaim(_nftTokenId, msg.sender);
         emit AgreementEnded(_nftTokenId, msg.sender, agreement.saleEnded);
     }
 
     //BuyerClaimFund function is used by the buyer to claim his nft when he fails to pay all installment before the end of the agreement period
-    function buyerClaimFund(uint256 _agreementId, uint256 _nftTokenId)
+    function buyerClaimFund(
+        uint256 _agreementId,
+        uint256 _nftTokenId)
         external
         CanClaim(_agreementId)
         returns (bool success)
@@ -298,15 +324,11 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         uint256 buyersDue = (bal * 90) / 100;
         uint256 contractFee =(bal *5) / 100;
         //Smart contract sends ether to the buyer
-        (bool dueSent, ) = payable(msg.sender).call{value: buyersDue}(
-            ""
-        );
-        require(dueSent, "Cannot send ether to the buyer");
+         payable(msg.sender).transfer(buyersDue);
+            
         //Smart contract sends ether to the owner
-        (bool feeSent, ) = payable(msg.sender).call{value: contractFee}(
-            ""
-        );
-        require(feeSent, "Cannot send ether to the buyer");
+         payable(msg.sender).transfer(contractFee);
+        
         agreements[_agreementId].saleEnded = true;
         emit BuyerClaim(_nftTokenId, msg.sender);
         emit AgreementEnded(
@@ -316,19 +338,7 @@ contract BitNFTMarketPlace is Ownable, IERC721Receiver {
         );
         return (success);
     }
-      //A view function that returns  AgreementId
-    // function getAgreementId(
-    //     address _nftContractAddress,
-    //     uint256 _nftTokenId,
-    //     uint256 _price )
-    //     public
-    //     view
-    //     returns (uint256)
-    // {
-
-    //     return 
-    // }
-
+  
     //A view function that returns  Bit-NFT-MarketPlace Commission
     function getBitMktCommision(uint256 _agreementId)
         public
