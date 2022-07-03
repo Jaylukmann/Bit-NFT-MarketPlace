@@ -8,8 +8,10 @@
 5. However,if the buyer defaults by not paying up before the  expiry of the agreement,he forfeits 10% of the total ether sent(5% to the marketplace and 5% compensation to the seller) while the seller gets back his NFT.
 6.  If the sale is an instant sale or instalment basis, the marketplace receive 5% of the NFT price...
 
-##TESTING
-The steps are :
+#TESTING
+
+###The steps are :
+
 1)Create 5 wallets with test ethers.
 
 2)Deploy the smart contract with the first wallet(owner).
